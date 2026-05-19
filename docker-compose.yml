@@ -1,0 +1,63 @@
+
+
+services:
+  # 1. The Database Service
+  db:
+    image: postgres:16-alpine
+    container_name: nesthaven-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: mysecretpassword
+      POSTGRES_DB: nesthaven
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d nesthaven"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. The Redis Queue Service
+  redis:
+    image: redis:7-alpine
+    container_name: nesthaven-redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+  # 3. The NestJS Backend Service
+  backend:
+    build: ./backend
+    container_name: nesthaven-backend
+    restart: always
+    ports:
+      - "3001:3001"
+    environment:
+      - DATABASE_URL=postgresql://postgres:mysecretpassword@db:5432/nesthaven?schema=public
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - PORT=3001
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  # 4. The Frontend Service
+  frontend:
+    build: ./frontend
+    container_name: nesthaven-frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./frontend/.env.local    # Allows Next.js to inject localized public keys
+    depends_on:
+      - backend
+    stdin_open: true
+
+volumes:
+  postgres_data:

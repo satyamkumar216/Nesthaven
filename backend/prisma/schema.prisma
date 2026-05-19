@@ -1,0 +1,231 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ==========================================
+// SPATIAL WAREHOUSING HIERARCHY
+// ==========================================
+
+enum WarehouseType {
+  RETAIL_STORE
+  FULFILLMENT_CENTER
+  DARK_STORE
+}
+
+model Warehouse {
+  id          String         @id @default(uuid()) @db.Uuid
+  name        String
+  type        WarehouseType
+  pincode     String
+  latitude    Float
+  longitude   Float
+  isActive    Boolean        @default(true) @map("is_active")
+    staff   Staff[]   // ← ADD THIS LINE
+  zones       WarehouseZone[]
+  orders      Order[]
+
+  @@map("warehouses")
+}
+
+model WarehouseZone {
+  id          String          @id @default(uuid()) @db.Uuid
+  warehouseId String          @db.Uuid @map("warehouse_id")
+  zoneCode    String          @map("zone_code")
+  warehouse   Warehouse       @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  racks       WarehouseRack[]
+
+  @@map("warehouse_zones")
+}
+
+model WarehouseRack {
+  id             String           @id @default(uuid()) @db.Uuid
+  zoneId         String           @db.Uuid @map("zone_id")
+  rackIdentifier String           @map("rack_identifier")
+  zone           WarehouseZone    @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  shelves        WarehouseShelf[]
+
+  @@map("warehouse_racks")
+}
+
+model WarehouseShelf {
+  id                     String           @id @default(uuid()) @db.Uuid
+  rackId                 String           @db.Uuid @map("rack_id")
+  shelfNumber            String           @map("shelf_number")
+  maxWeightCapacityGrams Int              @map("max_weight_capacity_grams")
+  rack                   WarehouseRack    @relation(fields: [rackId], references: [id], onDelete: Cascade)
+  stocks                 InventoryStock[]
+  ledgerEntries          InventoryLedger[]
+
+  @@map("warehouse_shelves")
+}
+
+// ==========================================
+// PRODUCT PARENT-VARIANT MATRIX
+// ==========================================
+
+model Product {
+  id          String           @id @default(uuid()) @db.Uuid
+  name        String
+  description String?
+  categoryId  String?          @db.Uuid @map("category_id")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  variants    ProductVariant[]
+
+  @@map("products")
+}
+
+model ProductVariant {
+  id               String           @id @default(uuid()) @db.Uuid
+  productId        String           @db.Uuid @map("product_id")
+  sku              String           @unique
+  attributes       Json             // JSONB storage for structural variants e.g., {"color": "Obsidian Matte", "size": "Set of 6"}
+  weightGrams      Int              @map("weight_grams")
+  baseCost         Decimal          @db.Decimal(10, 2) @map("base_cost")
+  retailPrice      Decimal          @db.Decimal(10, 2) @map("retail_price")
+  compareAtPrice   Decimal?         @db.Decimal(10, 2) @map("compare_at_price")
+  shopifyVariantId String?          @unique @map("shopify_variant_id")
+  product          Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  barcodes         Barcode[]
+  stocks           InventoryStock[]
+  ledgerEntries    InventoryLedger[]
+  orderItems       OrderItem[]
+
+  @@map("product_variants")
+}
+
+model Barcode {
+  id           String         @id @default(uuid()) @db.Uuid
+  variantId    String         @db.Uuid @map("variant_id")
+  barcodeValue String         @unique @map("barcode_value")
+  isActive     Boolean        @default(true) @map("is_active")
+  variant      ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@map("barcodes")
+}
+
+// ==========================================
+// INVENTORY STOCK LAYER & TRANSACTION LEDGER
+// ==========================================
+
+model InventoryStock {
+  id                String         @id @default(uuid()) @db.Uuid
+  variantId         String         @db.Uuid @map("variant_id")
+  shelfId           String         @db.Uuid @map("shelf_id")
+  quantityAvailable Int            @map("quantity_available")
+  quantityReserved  Int            @default(0) @map("quantity_reserved")
+  reorderPoint      Int            @default(10) @map("reorder_point")
+  variant           ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  shelf             WarehouseShelf @relation(fields: [shelfId], references: [id], onDelete: Restrict)
+
+  @@unique([variantId, shelfId]) // Strict compound unique index to avoid duplication rows
+  @@map("inventory_stocks")
+}
+
+enum LedgerReasonCode {
+  POS_SALE
+  SHOPIFY_SALE
+  MANUAL_AUDIT
+  PO_RECEIPT
+  SCRAP_WRITEOFF
+}
+
+model InventoryLedger {
+  id            String           @id @default(uuid()) @db.Uuid
+  variantId     String           @db.Uuid @map("variant_id")
+  shelfId       String           @db.Uuid @map("shelf_id")
+  quantityDelta Int              @map("quantity_delta")
+  reasonCode    LedgerReasonCode @map("reason_code")
+  userId        String?          @db.Uuid @map("user_id")
+  timestamp     DateTime         @default(now()) @map("timestamp")
+  variant       ProductVariant   @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  shelf         WarehouseShelf   @relation(fields: [shelfId], references: [id], onDelete: Restrict)
+
+  @@map("inventory_ledger")
+}
+
+// ==========================================
+// ORDERS & ORDER PROCESSING
+// ==========================================
+
+enum OrderSource {
+  POS
+  SHOPIFY
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+// Update the existing Order model — add two lines
+model Order {
+  id             String      @id @default(uuid()) @db.Uuid
+  warehouseId    String?     @db.Uuid @map("warehouse_id")
+  customerId     String?     @db.Uuid @map("customer_id")      // ← ADD
+  source         OrderSource
+  status         OrderStatus @default(PENDING)
+  idempotencyKey String      @unique @map("idempotency_key")
+  customerPhone  String?     @map("customer_phone")
+  subtotal       Decimal     @db.Decimal(10, 2)
+  gstTax         Decimal     @db.Decimal(10, 2) @map("gst_tax")
+  total          Decimal     @db.Decimal(10, 2)
+  createdAt      DateTime    @default(now()) @map("created_at")
+  warehouse      Warehouse?  @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  customer       Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull) // ← ADD
+  items          OrderItem[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id              String         @id @default(uuid()) @db.Uuid
+  orderId         String         @db.Uuid @map("order_id")
+  variantId       String         @db.Uuid @map("variant_id")
+  quantityOrdered Int            @map("quantity_ordered")
+  unitPrice       Decimal        @db.Decimal(10, 2) @map("unit_price")
+  order           Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant         ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  @@map("order_items")
+}
+
+model Customer {
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String
+  phone         String   @unique
+  email         String?
+  loyaltyPoints Int      @default(0) @map("loyalty_points")
+  createdAt     DateTime @default(now()) @map("created_at")
+  orders        Order[]
+
+  @@map("customers")
+}
+
+ enum StaffRole {
+  OWNER
+  MANAGER
+  CASHIER
+}
+
+model Staff {
+  id          String      @id @default(uuid()) @db.Uuid
+  name        String
+  email       String      @unique
+  pin         String      // bcrypt hashed 4-digit PIN
+  role        StaffRole   @default(CASHIER)
+  warehouseId String      @db.Uuid @map("warehouse_id")
+  isActive    Boolean     @default(true) @map("is_active")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  warehouse   Warehouse   @relation(fields: [warehouseId], references: [id])
+
+  @@map("staff")
+}
+
