@@ -1,186 +1,116 @@
-import { PrismaClient, WarehouseType, LedgerReasonCode, StaffRole } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
+// prisma/seed.ts
+// Run: npx ts-node prisma/seed.ts
+import { PrismaClient } from '@prisma/client';
+import * as bcrypt      from 'bcrypt';
 
 const prisma = new PrismaClient();
 
+const PERMISSIONS = [
+  // Products
+  { action: 'CREATE_PRODUCT', subject: 'PRODUCT'   },
+  { action: 'READ_PRODUCT',   subject: 'PRODUCT'   },
+  { action: 'UPDATE_PRODUCT', subject: 'PRODUCT'   },
+  { action: 'DELETE_PRODUCT', subject: 'PRODUCT'   },
+  // Inventory
+  { action: 'MANAGE_INVENTORY', subject: 'INVENTORY' },
+  { action: 'READ_INVENTORY',   subject: 'INVENTORY' },
+  // Orders / POS
+  { action: 'CREATE_ORDER',     subject: 'ORDER'    },
+  { action: 'READ_ORDER',       subject: 'ORDER'    },
+  { action: 'VOID_SALE',        subject: 'ORDER'    },
+  { action: 'PROCESS_REFUND',   subject: 'ORDER'    },
+  // Reports
+  { action: 'READ_REPORT',      subject: '*'         },
+  // Staff
+  { action: 'MANAGE_STAFF',     subject: 'USER'     },
+];
+
+const ROLES: { name: string; isSystem: boolean; permissions: string[] }[] = [
+  {
+    name       : 'SUPER_ADMIN',
+    isSystem   : true,
+    permissions: PERMISSIONS.map((p) => p.action), // all
+  },
+  {
+    name       : 'MANAGER',
+    isSystem   : true,
+    permissions: [
+      'CREATE_PRODUCT','READ_PRODUCT','UPDATE_PRODUCT',
+      'MANAGE_INVENTORY','READ_INVENTORY',
+      'CREATE_ORDER','READ_ORDER','VOID_SALE','PROCESS_REFUND',
+      'READ_REPORT','MANAGE_STAFF',
+    ],
+  },
+  {
+    name       : 'CASHIER',
+    isSystem   : true,
+    permissions: ['CREATE_ORDER','READ_ORDER','READ_PRODUCT','READ_INVENTORY'],
+  },
+  {
+    name       : 'WAREHOUSE_STAFF',
+    isSystem   : true,
+    permissions: ['MANAGE_INVENTORY','READ_INVENTORY','READ_PRODUCT'],
+  },
+];
+
 async function main() {
-  console.log('🌱 Starting seed...\n');
-
-  // ── 1. WAREHOUSE ─────────────────────────────────────────────
-  const warehouse = await prisma.warehouse.upsert({
-    where: { id: '00000000-0000-0000-0000-000000000001' },
-    update: {},
-    create: {
-      id:        '00000000-0000-0000-0000-000000000001',
-      name:      'Main Store',
-      type:      WarehouseType.RETAIL_STORE,
-      pincode:   '110001',
-      latitude:  28.6139,
-      longitude: 77.2090,
-      isActive:  true,
-    },
-  });
-  console.log(`✅ Warehouse:  ${warehouse.name} (${warehouse.id})`);
-
-  // ── 2. ZONE → RACK → SHELF ───────────────────────────────────
-  const zone = await prisma.warehouseZone.upsert({
-    where: { id: '00000000-0000-0000-0000-000000000010' },
-    update: {},
-    create: {
-      id:          '00000000-0000-0000-0000-000000000010',
-      warehouseId: warehouse.id,
-      zoneCode:    'A',
-    },
-  });
-
-  const rack = await prisma.warehouseRack.upsert({
-    where: { id: '00000000-0000-0000-0000-000000000020' },
-    update: {},
-    create: {
-      id:             '00000000-0000-0000-0000-000000000020',
-      zoneId:         zone.id,
-      rackIdentifier: 'R1',
-    },
-  });
-
-  const shelf = await prisma.warehouseShelf.upsert({
-    where: { id: '00000000-0000-0000-0000-000000000030' },
-    update: {},
-    create: {
-      id:                     '00000000-0000-0000-0000-000000000030',
-      rackId:                 rack.id,
-      shelfNumber:            'S1',
-      maxWeightCapacityGrams: 50000,
-    },
-  });
-  console.log(`✅ Location:   Zone A → Rack R1 → Shelf S1`);
-
-  // ── 3. PRODUCT ───────────────────────────────────────────────
-  const product = await prisma.product.upsert({
-    where: { id: '00000000-0000-0000-0000-000000000040' },
-    update: {},
-    create: {
-      id:          '00000000-0000-0000-0000-000000000040',
-      name:        'Ceramic Mug Set',
-      description: 'Set of 6 premium ceramic mugs',
-    },
-  });
-  console.log(`✅ Product:    ${product.name} (${product.id})`);
-
-  // ── 4. PRODUCT VARIANT ───────────────────────────────────────
-  const variant = await prisma.productVariant.upsert({
-    where: { sku: 'MUG-SET-6-BLK' },
-    update: {},
-    create: {
-      id:          '00000000-0000-0000-0000-000000000050',
-      productId:   product.id,
-      sku:         'MUG-SET-6-BLK',
-      attributes:  { color: 'Obsidian Matte', size: 'Set of 6' },
-      weightGrams: 1800,
-      baseCost:    350.00,
-      retailPrice: 799.00,
-    },
-  });
-  console.log(`✅ Variant:    ${variant.sku} @ ₹${variant.retailPrice}`);
-
-  // ── 5. BARCODE ───────────────────────────────────────────────
-  const barcode = await prisma.barcode.upsert({
-    where: { barcodeValue: '8901234567890' },
-    update: {},
-    create: {
-      variantId:    variant.id,
-      barcodeValue: '8901234567890',
-      isActive:     true,
-    },
-  });
-  console.log(`✅ Barcode:    ${barcode.barcodeValue}`);
-
-  // ── 6. INVENTORY STOCK ───────────────────────────────────────
-  const stock = await prisma.inventoryStock.upsert({
-    where: {
-      variantId_shelfId: {
-        variantId: variant.id,
-        shelfId:   shelf.id,
-      },
-    },
-    update: { quantityAvailable: 50 },
-    create: {
-      variantId:         variant.id,
-      shelfId:           shelf.id,
-      quantityAvailable: 50,
-      quantityReserved:  0,
-      reorderPoint:      10,
-    },
-  });
-  console.log(`✅ Stock:      ${stock.quantityAvailable} units on shelf S1`);
-
-  // ── 7. OPENING LEDGER ENTRY ──────────────────────────────────
-  const existingEntry = await prisma.inventoryLedger.findFirst({
-    where: {
-      variantId:  variant.id,
-      shelfId:    shelf.id,
-      reasonCode: LedgerReasonCode.PO_RECEIPT,
-    },
-  });
-
-  if (!existingEntry) {
-    await prisma.inventoryLedger.create({
-      data: {
-        variantId:     variant.id,
-        shelfId:       shelf.id,
-        quantityDelta: 50,
-        reasonCode:    LedgerReasonCode.PO_RECEIPT,
-      },
+  console.log('🌱 Seeding permissions …');
+  for (const p of PERMISSIONS) {
+    await prisma.permission.upsert({
+      where : { action_subject: { action: p.action, subject: p.subject } },
+      update: {},
+      create: p,
     });
-    console.log(`✅ Ledger:     Opening entry of +50 units recorded`);
-  } else {
-    console.log(`⏭  Ledger:     Opening entry already exists, skipped`);
   }
 
-  // ── 8. DEMO CUSTOMER ─────────────────────────────────────────
-  const customer = await prisma.customer.upsert({
-    where: { phone: '9999999999' },
+  console.log('🌱 Seeding roles …');
+  for (const roleDef of ROLES) {
+    const role = await prisma.role.upsert({
+      where : { name: roleDef.name },
+      update: { isSystem: roleDef.isSystem },
+      create: { name: roleDef.name, isSystem: roleDef.isSystem },
+    });
+
+    const perms = await prisma.permission.findMany({
+      where: { action: { in: roleDef.permissions } },
+    });
+
+    for (const perm of perms) {
+      await prisma.rolePermission.upsert({
+        where : { roleId_permissionId: { roleId: role.id, permissionId: perm.id } },
+        update: {},
+        create: { roleId: role.id, permissionId: perm.id },
+      });
+    }
+  }
+
+  console.log('🌱 Seeding super-admin user …');
+  const adminRole = await prisma.role.findUniqueOrThrow({ where: { name: 'SUPER_ADMIN' } });
+  const hash      = await bcrypt.hash('Admin#2024!', 12);
+
+  const admin = await prisma.user.upsert({
+    where : { email: 'admin@pos.io' },
     update: {},
     create: {
-      name:          'Demo Customer',
-      phone:         '9999999999',
-      email:         'demo@nesthaven.in',
-      loyaltyPoints: 100,
+      email        : 'admin@pos.io',
+      username     : 'superadmin',
+      passwordHash : hash,
+      firstName    : 'Super',
+      lastName     : 'Admin',
+      isActive     : true,
+      isVerified   : true,
     },
   });
-  console.log(`✅ Customer:   ${customer.name} (${customer.phone})`);
 
-  // ── 9. SEED STAFF ────────────────────────────────────────────
-  const hashedPin = await bcrypt.hash('1234', 10);
-  const staff = await prisma.staff.upsert({
-    where: { email: 'manager@nesthaven.in' },
+  await prisma.userRole.upsert({
+    where : { userId_roleId: { userId: admin.id, roleId: adminRole.id } },
     update: {},
-    create: {
-      name:        'Store Manager',
-      email:       'manager@nesthaven.in',
-      pin:         hashedPin,
-      role:        StaffRole.MANAGER,
-      warehouseId: warehouse.id,
-    },
+    create: { userId: admin.id, roleId: adminRole.id },
   });
-  console.log(`✅ Staff:      ${staff.name} (${staff.email}) PIN: 1234`);
 
-  // ── SUMMARY ──────────────────────────────────────────────────
-  console.log('\n─────────────────────────────────────────────');
-  console.log('🎉 Seed complete! Use these values for testing:');
-  console.log(`   Warehouse ID : ${warehouse.id}`);
-  console.log(`   Variant ID   : ${variant.id}`);
-  console.log(`   Barcode      : 8901234567890`);
-  console.log(`   Customer Tel : 9999999999`);
-  console.log(`   Staff Login  : manager@nesthaven.in (PIN: 1234)`);
-  console.log('─────────────────────────────────────────────\n');
+  console.log('✅ Seed complete.');
 }
 
 main()
-  .catch((err) => {
-    console.error('❌ Seed failed:', err);
-    throw err;
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+  .catch(console.error)
+  .finally(() => prisma.$disconnect());

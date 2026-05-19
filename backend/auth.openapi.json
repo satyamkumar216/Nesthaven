@@ -1,0 +1,239 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "POS / IMS API — Epoch 1: Foundation",
+    "description": "Modular Monolith Point-of-Sale & Inventory Management System",
+    "version": "1.0.0",
+    "contact": { "name": "POS Engineering" }
+  },
+  "servers": [
+    { "url": "http://localhost:3000/api/v1", "description": "Local Dev" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "access-token": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT issued by POST /auth/login. Valid for 15 minutes."
+      }
+    },
+    "schemas": {
+      "LoginDto": {
+        "type": "object",
+        "required": ["email", "password"],
+        "properties": {
+          "email":    { "type": "string", "format": "email",    "example": "manager@pos.io" },
+          "password": { "type": "string", "minLength": 8,       "example": "StrongPass#2024" }
+        }
+      },
+      "PermissionResponse": {
+        "type": "object",
+        "properties": {
+          "action":  { "type": "string", "example": "CREATE_PRODUCT" },
+          "subject": { "type": "string", "example": "PRODUCT" }
+        }
+      },
+      "RoleResponse": {
+        "type": "object",
+        "properties": {
+          "id":          { "type": "string", "example": "clx1roleabc" },
+          "name":        { "type": "string", "example": "MANAGER" },
+          "permissions": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/PermissionResponse" }
+          }
+        }
+      },
+      "UserResponse": {
+        "type": "object",
+        "properties": {
+          "id":          { "type": "string", "example": "clx1userabc123" },
+          "email":       { "type": "string", "example": "manager@pos.io" },
+          "username":    { "type": "string", "example": "jdoe" },
+          "firstName":   { "type": "string", "example": "John" },
+          "lastName":    { "type": "string", "example": "Doe" },
+          "isActive":    { "type": "boolean","example": true },
+          "isVerified":  { "type": "boolean","example": true },
+          "lastLoginAt": {
+            "type"    : "string",
+            "format"  : "date-time",
+            "nullable": true,
+            "example" : "2024-06-01T09:15:00.000Z"
+          },
+          "createdAt":   {
+            "type"  : "string",
+            "format": "date-time",
+            "example": "2024-01-01T00:00:00.000Z"
+          },
+          "roles": {
+            "type" : "array",
+            "items": { "$ref": "#/components/schemas/RoleResponse" }
+          }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "properties": {
+          "accessToken":  {
+            "type"       : "string",
+            "description": "Short-lived JWT — attach as Authorization: Bearer <token>",
+            "example"    : "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjbHgxdXNlcmFiYzEyMyIsImVtYWlsIjoibWFuYWdlckBwb3MuaW8iLCJ1c2VybmFtZSI6Impkb2UiLCJyb2xlcyI6WyJNQU5BR0VSIl0sInBlcm1pc3Npb25zIjpbIkNSRUFURV9QUk9EVUNUOlBST0RVQ1QiLCJSRUFEX1JFUE9SVDoqIl0sImlhdCI6MTcxNzIzMDAwMCwiZXhwIjoxNzE3MjMwOTAwLCJpc3MiOiJwb3MtaW1zIn0.SIGNATURE"
+          },
+          "refreshToken": {
+            "type"       : "string",
+            "description": "Long-lived opaque token (7 days) — store in httpOnly cookie",
+            "example"    : "a3f1b2c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0"
+          },
+          "expiresIn": {
+            "type"       : "integer",
+            "description": "Access token TTL in seconds",
+            "example"    : 900
+          },
+          "tokenType": {
+            "type"   : "string",
+            "example": "Bearer"
+          },
+          "user": { "$ref": "#/components/schemas/UserResponse" }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "statusCode": { "type": "integer" },
+          "message":    { "type": "string"  },
+          "error":      { "type": "string"  }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/auth/login": {
+      "post": {
+        "tags"       : ["Auth"],
+        "operationId": "login",
+        "summary"    : "Authenticate a user",
+        "description": "Validates email + password and returns a JWT access token, refresh token, and full user profile with resolved roles and permissions.",
+        "requestBody": {
+          "required": true,
+          "content" : {
+            "application/json": {
+              "schema"  : { "$ref": "#/components/schemas/LoginDto" },
+              "example" : { "email": "manager@pos.io", "password": "StrongPass#2024" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "✅ Login successful",
+            "content"    : {
+              "application/json": {
+                "schema" : { "$ref": "#/components/schemas/LoginResponse" },
+                "example": {
+                  "accessToken" : "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjbHgxdXNlcmFiYzEyMyIsImVtYWlsIjoibWFuYWdlckBwb3MuaW8iLCJ1c2VybmFtZSI6Impkb2UiLCJyb2xlcyI6WyJNQU5BR0VSIl0sInBlcm1pc3Npb25zIjpbIkNSRUFURV9QUk9EVUNUOlBST0RVQ1QiLCJSRUFEX1JFUE9SVDoqIl0sImlhdCI6MTcxNzIzMDAwMCwiZXhwIjoxNzE3MjMwOTAwLCJpc3MiOiJwb3MtaW1zIn0.SIGNATURE",
+                  "refreshToken": "a3f1b2c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2",
+                  "expiresIn"   : 900,
+                  "tokenType"   : "Bearer",
+                  "user": {
+                    "id"         : "clx1userabc123",
+                    "email"      : "manager@pos.io",
+                    "username"   : "jdoe",
+                    "firstName"  : "John",
+                    "lastName"   : "Doe",
+                    "isActive"   : true,
+                    "isVerified" : true,
+                    "lastLoginAt": "2024-06-01T09:15:00.000Z",
+                    "createdAt"  : "2024-01-01T00:00:00.000Z",
+                    "roles": [
+                      {
+                        "id"  : "clx1roleabc",
+                        "name": "MANAGER",
+                        "permissions": [
+                          { "action": "CREATE_PRODUCT", "subject": "PRODUCT"   },
+                          { "action": "UPDATE_PRODUCT", "subject": "PRODUCT"   },
+                          { "action": "READ_REPORT",    "subject": "*"          },
+                          { "action": "VOID_SALE",      "subject": "ORDER"     },
+                          { "action": "MANAGE_STAFF",   "subject": "USER"      }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "❌ Invalid credentials",
+            "content"    : {
+              "application/json": {
+                "schema" : { "$ref": "#/components/schemas/ErrorResponse" },
+                "example": { "statusCode": 401, "message": "Invalid credentials.", "error": "Unauthorized" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags"       : ["Auth"],
+        "operationId": "getMe",
+        "summary"    : "Get current authenticated user",
+        "description": "Returns the full profile of the user identified by the Bearer token, including roles and resolved permissions.",
+        "security"   : [{ "access-token": [] }],
+        "responses"  : {
+          "200": {
+            "description": "✅ Authenticated user profile",
+            "content"    : {
+              "application/json": {
+                "schema" : { "$ref": "#/components/schemas/UserResponse" },
+                "example": {
+                  "id"         : "clx1userabc123",
+                  "email"      : "manager@pos.io",
+                  "username"   : "jdoe",
+                  "firstName"  : "John",
+                  "lastName"   : "Doe",
+                  "isActive"   : true,
+                  "isVerified" : true,
+                  "lastLoginAt": "2024-06-01T10:45:00.000Z",
+                  "createdAt"  : "2024-01-01T00:00:00.000Z",
+                  "roles": [
+                    {
+                      "id"  : "clx1roleabc",
+                      "name": "MANAGER",
+                      "permissions": [
+                        { "action": "CREATE_PRODUCT", "subject": "PRODUCT" },
+                        { "action": "UPDATE_PRODUCT", "subject": "PRODUCT" },
+                        { "action": "READ_REPORT",    "subject": "*"        },
+                        { "action": "VOID_SALE",      "subject": "ORDER"   },
+                        { "action": "MANAGE_STAFF",   "subject": "USER"    }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "❌ Token missing or expired",
+            "content": {
+              "application/json": {
+                "schema" : { "$ref": "#/components/schemas/ErrorResponse" },
+                "example": { "statusCode": 401, "message": "Access token is missing or invalid.", "error": "Unauthorized" }
+              }
+            }
+          },
+          "403": {
+            "description": "❌ Account inactive",
+            "content": {
+              "application/json": {
+                "schema" : { "$ref": "#/components/schemas/ErrorResponse" },
+                "example": { "statusCode": 403, "message": "Account is inactive.", "error": "Forbidden" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
